@@ -186,6 +186,7 @@ public class ContikiClock extends Clock implements PolledBeforeActiveTicks, Poll
           clockDrift_ppm = min_ppm
                  + simulation.getRandomGenerator().nextInt(max_ppm - min_ppm);
       }
+      logger.info("Mote"+mote.getID() + " clockDrift="+clockDrift_ppm + " [ppm]");
 
       if (clockDrift_ppm != 0)
           clockDriftRate = 1000000/clockDrift_ppm;
@@ -239,7 +240,15 @@ public class ContikiClock extends Clock implements PolledBeforeActiveTicks, Poll
     /* Always schedule for Rtimer if anything pending */
     if (moteMem.getIntValueOf("simRtimerPending") != 0) {
       long nextTime = moteMem.getInt64ValueOf("simRtimerNextExpirationTime");
-      scheduleNextWakeupRTC(nextTime);
+      long nextSimTime = scheduleNextWakeupRTC(nextTime);
+      if (clockDriftRate != 0) {
+          // FIX: check that expiration value not decimated by drift,
+          // if so - adjust mote expiration, since firmware rTimer may loose wake, 
+          //    if have not exact mutch
+          long nextRTime = rtcTimeAt(nextSimTime);
+          if (nextTime != nextRTime)
+              moteMem.setInt64ValueOf("simRtimerNextExpirationTime", nextRTime);
+      }
     }
 
     long   rtimerWaitTime = currentTime;
@@ -278,7 +287,12 @@ public class ContikiClock extends Clock implements PolledBeforeActiveTicks, Poll
     }
   }
 
-  public void scheduleNextWakeupRTC(long rtcTime) {
+  /* @brief evaluate next simulation time schedule it
+   * @arg rtcTime - rTime value when schedule must invoke mote
+   * @result    evaluated simulation time for schedule  
+   * */
+  public 
+  long scheduleNextWakeupRTC(long rtcTime) {
       long simTime = rtcTime - clockDrift;
       if (clockDriftRate != 0) {
           //evaluate next simulation wake Time, correcting by drift rate
@@ -307,9 +321,9 @@ public class ContikiClock extends Clock implements PolledBeforeActiveTicks, Poll
                       + " - " + (rtcNextTime - rtcTime));
 
               if (drift == -(rtcNextTime - rtcTime))
-              if (drift >= 1)
+              if (drift <= -1)
               {
-                  // looks ringing around decimated rtc value, so awake before that
+                  // looks ringing around decimated rtc value, so awake after that
                   break;
               }
               drift = (rtcNextTime - rtcTime);
@@ -320,6 +334,7 @@ public class ContikiClock extends Clock implements PolledBeforeActiveTicks, Poll
           }
       }
       mote.scheduleNextWakeup( simTime );
+      return simTime;
   }
 
 
